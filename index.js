@@ -1,11 +1,12 @@
 const axios = require('axios');
 const moment = require('moment');
-const readlineSync = require('readline-sync');
+const fs = require('fs');
 
 // URL endpoints
 const loginUrl = 'https://tgapp-api.matchain.io/api/tgapp/v1/user/login';
 const claimUrl = 'https://tgapp-api.matchain.io/api/tgapp/v1/point/reward/farming';
 
+// Headers without authorization (for initial login)
 const getInitialHeaders = () => ({
    Accept: 'application/json, text/plain, */*',
    'Content-Type': 'application/json',
@@ -35,81 +36,91 @@ const getAuthHeaders = (token) => ({
    'Sec-Fetch-Site': 'same-site',
 });
 
-// Prompt user for input
-const first_name = readlineSync.question('Enter first name: ');
-const last_name = readlineSync.question('Enter last name: ');
-const tg_login_params = readlineSync.question('Enter tg_login_params: ');
-const uid = parseInt(readlineSync.question('Enter UID: '), 10);
-const username = readlineSync.question('Enter username: ');
+// Read accounts from a text file
+const accounts = fs
+   .readFileSync('accounts.txt', 'utf-8')
+   .trim()
+   .split('\n')
+   .map((line) => {
+      const [first_name, last_name, tg_login_params, uid, username] = line.split(',');
+      return { first_name, last_name, tg_login_params, uid: parseInt(uid, 10), username };
+   });
 
-// Payload for login
-const loginPayload = {
-   first_name: first_name,
-   last_name: last_name,
-   tg_login_params: tg_login_params,
-   uid: uid,
-   username: username,
-};
+const tokens = {};
 
-const claimPayload = {
-   uid: uid,
-};
+// Function to login and get token
+async function login(account) {
+   const loginPayload = {
+      first_name: account.first_name,
+      last_name: account.last_name,
+      tg_login_params: account.tg_login_params,
+      uid: account.uid,
+      username: account.username,
+   };
 
-let token = '';
-
-async function login() {
    try {
       const response = await axios.post(loginUrl, loginPayload, { headers: getInitialHeaders() });
 
       if (response.data && response.data.code === 200) {
-         token = response.data.data.token;
-         console.log(`[ ${moment().format('HH:mm:ss')} ] Token obtained successfully: ${token}`);
+         tokens[account.username] = response.data.data.token;
+         console.log(`[ ${moment().format('HH:mm:ss')} ] Token obtained successfully for ${account.username}: ${tokens[account.username]}`);
       } else {
-         console.error(`[ ${moment().format('HH:mm:ss')} ] Failed to obtain token.`);
+         console.error(`[ ${moment().format('HH:mm:ss')} ] Failed to obtain token for ${account.username}.`);
          console.log(response.data);
       }
    } catch (error) {
-      console.error(`[ ${moment().format('HH:mm:ss')} ] Error obtaining token:`, error.message);
+      console.error(`[ ${moment().format('HH:mm:ss')} ] Error obtaining token for ${account.username}:`, error.message);
       if (error.response) {
          console.error('Error response data:', error.response.data);
       }
    }
 }
 
-async function makeClaim() {
+// Function to make a claim
+async function makeClaim(account) {
+   const token = tokens[account.username];
    if (!token) {
-      console.error(`[ ${moment().format('HH:mm:ss')} ] No token available for making a claim.`);
+      console.error(`[ ${moment().format('HH:mm:ss')} ] No token available for making a claim for ${account.username}.`);
       return;
    }
+
+   const claimPayload = {
+      uid: account.uid,
+   };
+
    try {
       const headers = getAuthHeaders(token);
       const response = await axios.post(claimUrl, claimPayload, { headers });
 
       if (response.data && response.data.code === 200) {
-         console.log(`[ ${moment().format('HH:mm:ss')} ] Claim successful: ${JSON.stringify(response.data.data)}`);
+         console.log(`[ ${moment().format('HH:mm:ss')} ] Claim successful for ${account.username}: ${JSON.stringify(response.data.data)}`);
       } else {
-         console.error(`[ ${moment().format('HH:mm:ss')} ] Failed to make claim.`);
+         console.error(`[ ${moment().format('HH:mm:ss')} ] Failed to make claim for ${account.username}.`);
          console.log(response.data);
       }
    } catch (error) {
-      console.error(`[ ${moment().format('HH:mm:ss')} ] Error making claim:`, error.message);
+      console.error(`[ ${moment().format('HH:mm:ss')} ] Error making claim for ${account.username}:`, error.message);
       if (error.response) {
          console.error('Error response data:', error.response.data);
       }
    }
 }
 
-function scheduleTasks() {
+// Function to schedule login and claim
+function scheduleTasks(account) {
+   // Login every 5 hours
    setInterval(async () => {
-      await login();
-   }, 5 * 60 * 60 * 1000);
+      await login(account);
+   }, 5 * 60 * 60 * 1000); // 5 hours in milliseconds
 
+   // Claim every 10 minutes
    setInterval(async () => {
-      await makeClaim();
-   }, 300000);
+      await makeClaim(account);
+   }, 10 * 60 * 1000); // 10 minutes in milliseconds
 }
 
-(async () => {
-   await login();
-   scheduleTasks();
-})();
+// Initial login and start scheduling for each account
+accounts.forEach(async (account) => {
+   await login(account);
+   scheduleTasks(account);
+});
