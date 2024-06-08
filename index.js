@@ -4,7 +4,8 @@ const fs = require('fs');
 
 // URL endpoints
 const loginUrl = 'https://tgapp-api.matchain.io/api/tgapp/v1/user/login';
-const claimUrl = 'https://tgapp-api.matchain.io/api/tgapp/v1/point/reward/farming';
+const startFarmingUrl = 'https://tgapp-api.matchain.io/api/tgapp/v1/point/reward/farming';
+const rewardClaimUrl = 'https://tgapp-api.matchain.io/api/tgapp/v1/point/reward/claim';
 
 // Headers without authorization (for initial login)
 const getInitialHeaders = () => ({
@@ -77,7 +78,7 @@ async function login(account) {
 }
 
 // Function to make a claim
-async function makeClaim(account) {
+async function makeClaim(account, claimUrl) {
    const token = tokens[account.username];
    if (!token) {
       console.error(`[ ${moment().format('HH:mm:ss')} ] No token available for making a claim for ${account.username}.`);
@@ -106,21 +107,28 @@ async function makeClaim(account) {
    }
 }
 
-// Function to schedule login and claim
-function scheduleTasks(account) {
+// Function to schedule login and claim with delay
+async function scheduleTasks(account, delay) {
+   await new Promise((resolve) => setTimeout(resolve, delay));
+
    // Login every 5 hours
    setInterval(async () => {
       await login(account);
-   }, 5 * 60 * 60 * 1000); // 5 hours in milliseconds
+   }, 5 * 60 * 60 * 1000);
 
-   // Claim every 10 minutes
    setInterval(async () => {
-      await makeClaim(account);
-   }, 10 * 60 * 1000); // 10 minutes in milliseconds
+      await makeClaim(account, startFarmingUrl);
+   }, 3 * 60 * 1000);
+
+   setInterval(async () => {
+      await makeClaim(account, rewardClaimUrl);
+   }, 4.2 * 60 * 1000);
+
+   // Initial login
+   await login(account);
 }
 
-// Initial login and start scheduling for each account
-accounts.forEach(async (account) => {
-   await login(account);
-   scheduleTasks(account);
+accounts.forEach(async (account, index) => {
+   const delay = index * 10 * 1000;
+   await scheduleTasks(account, delay);
 });
